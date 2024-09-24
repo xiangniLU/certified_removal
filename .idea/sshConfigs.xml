@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="SshConfigs">
+    <configs>
+      <sshConfig authType="PASSWORD" connectionConfig="{&quot;serverAliveInterval&quot;:300}" host="本地主机" id="a3aff96d-a8ca-4c95-b30f-e146b180c8f4" port="22" customName="lab" nameFormat="CUSTOM" useOpenSSHConfig="true">
+        <option name="customName" value="lab" />
+      </sshConfig>
+    </configs>
+  </component>
+</project>
