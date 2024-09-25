@@ -208,16 +208,18 @@ else:
         b = args.std * torch.randn(X_train.size(1), y_train_onehot.size(1)).float().to(device)
         if args.train_sep:
             # train K binary LR models separately
+            # 初始化权重矩阵w
             w = torch.zeros(b.size()).float().to(device)
             for k in range(y_train_onehot.size(1)):
                 if weight is None:
                     w[:, k] = lr_optimize(X_train, y_train_onehot[:, k], args.lam, b=b[:, k], num_steps=args.num_steps,
-                                          verbose=args.verbose)
+                                          verbose=args.verbose)# 遍历每个类别，训练二分类模型
                 else:
+                    # 如果有权重，基于权重训练逻辑回归模型
                     w[:, k] = lr_optimize(X_train[weight[:, k].gt(0)], y_train_onehot[:, k][weight[:, k].gt(0)],
                                           args.lam, b=b[:, k], num_steps=args.num_steps, verbose=args.verbose)
         else:
-            # train K binary LR models jointly
+            # # 一次性联合训练所有二分类模型
             w = ovr_lr_optimize(X_train, y_train_onehot, args.lam, weight, b=b, num_steps=args.num_steps,
                                 verbose=args.verbose)
     else:
@@ -234,12 +236,13 @@ if args.train_mode == 'ovr':
 else:
     pred = X_test.mv(w)
     print('Test accuracy = %.4f' % pred.gt(0).squeeze().eq(y_test.gt(0)).float().mean())
-# 初始化梯度范数近似值和时间数组
+# # 初始化梯度范数近似值数组和时间数组，用于记录每次移除样本后的梯度变化
 grad_norm_approx = torch.zeros(args.num_removes).float()
 times = torch.zeros(args.num_removes)
+# 如果训练模式为“一对其余”，调整训练标签
 if args.train_mode == 'ovr':
     y_train = y_train_onehot
-# 复制权重矩阵w的近似值
+# 复制当前权重矩阵，以进行移除样本时的近似更新
 w_approx = w.clone()
 # 随机排列索引
 perm = torch.randperm(X_train.size(0)).to(y_train.device)
@@ -248,29 +251,18 @@ X_train = X_train.float().to(device)
 y_train = y_train[perm].float().to(device)
 
 # initialize K = X^T * X for fast computation of spectral norm
-print('Preparing for removal')
-if weight is None:
-    K = X_train.t().mm(X_train)
-else:
-    # 如果指定了权重，则根据权重计算多个K矩阵
-    # 将权重根据索引排列，并转移到指定设备
-    weight = weight.index_select(0, perm.to(device))
-    Ks = []
-    # 遍历每个类别，计算对应的K矩阵
-    for i in range(y_train_onehot.size(1)):
-        # 提取出对应类别的样本子集，并计算子集的K矩阵
-        X_sub = X_train.cpu()[weight[:, i].gt(0).cpu()]
-        Ks.append(X_sub.t().mm(X_sub).to(device))
 
 print('Preparing for removal')
 if weight is None:
-    K = X_train.t().mm(X_train)
+    K = X_train.t().mm(X_train) ## 计算X^T * X矩阵
 else:
+    # 如果指定了权重，根据权重计算多个K矩阵
     weight = weight.index_select(0, perm.to(device))
     Ks = []
     for i in range(y_train_onehot.size(1)):
-        X_sub = X_train.cpu()[weight[:, i].gt(0).cpu()]
-        Ks.append(X_sub.t().mm(X_sub).to(device))
+        # 针对每个类别，计算对应的K矩阵
+        X_sub = X_train.cpu()[weight[:, i].gt(0).cpu()]#选择当前类别中权重大于0的训练样本
+        Ks.append(X_sub.t().mm(X_sub).to(device))#计算选定样本的转置矩阵与自身的矩阵乘积，并将结果添加到Ks列表中
 
 print('Testing removal')
 for i in range(args.num_removes):
@@ -279,24 +271,31 @@ for i in range(args.num_removes):
         # removal from all one-vs-rest models
         for k in range(y_train_onehot.size(1)):
             if weight is None or weight[i, k] > 0:
-                X_rem = X_train[(i+1):]
+                X_rem = X_train[(i+1):]#剩余训练样本的特征矩阵
                 y_rem = y_train[(i+1):, k]
                 if weight is not None:
                     X_rem = X_rem[weight[(i+1):, k].gt(0)]
                     y_rem = y_rem[weight[(i+1):, k].gt(0)]
-                H_inv = lr_hessian_inv(w_approx[:, k], X_rem, y_rem, args.lam)
-                grad_i = lr_grad(w_approx[:, k], X_train[i].unsqueeze(0), y_train[i, k].unsqueeze(0), args.lam)
-                # apply rank-1 down-date to K
+                H_inv = lr_hessian_inv(w_approx[:, k], X_rem, y_rem, args.lam) # 计算Hessian矩阵的逆
+                grad_i = lr_grad(w_approx[:, k], X_train[i].unsqueeze(0), y_train[i, k].unsqueeze(0), args.lam)# 计算梯度
+                # 更新K矩阵，减去样本对K的贡献
                 if weight is None:
                     K -= torch.ger(X_train[i], X_train[i])
                     spec_norm = spectral_norm(K)
+                    #矩阵更新(Hessian的近似更新)
                 else:
                     Ks[k] -= torch.ger(X_train[i], X_train[i])
                     spec_norm = spectral_norm(Ks[k])
-                Delta = H_inv.mv(grad_i)
-                Delta_p = X_rem.mv(Delta)
-                w_approx[:, k] += Delta
-                grad_norm_approx[i] += (Delta.norm() * Delta_p.norm() * spec_norm / 4).cpu()
+                Delta = H_inv.mv(grad_i)#Hessian 矩阵的逆矩阵与梯度的乘积，结果是权重的更新量Delta
+                Delta_p = X_rem.mv(Delta)#更新量对剩余样本的整体影响
+                w_approx[:, k] += Delta#更新第 k 类别的权重向量 w_approx，增加计算出的权重更新量 Delta
+                grad_norm_approx[i] += (Delta.norm() * Delta_p.norm() * spec_norm / 4).cpu()#梯度范数的近似计算
+                '''
+                Delta.norm() 表示移除样本后，权重更新的幅度。
+                Delta_p.norm() 表示这个更新对剩余样本的影响。
+                spec_norm 表示模型矩阵的尺度。
+                这三个因素的乘积反映了模型在移除样本后对整体损失的变化。除以 4 是为了调整尺度，使结果更平稳。
+                '''
     else:
         # removal from a single binary logistic regression model
         # X_rem = X_train[(i+1):]
