@@ -288,7 +288,7 @@ for i in range(args.num_removes):
                     spec_norm = spectral_norm(Ks[k])
                 Delta = H_inv.mv(grad_i)#Hessian 矩阵的逆矩阵与梯度的乘积，结果是权重的更新量Delta
                 Delta_p = X_rem.mv(Delta)#更新量对剩余样本的整体影响
-                w_approx[:, k] += Delta#更新第 k 类别的权重向量 w_approx，增加计算出的权重更新量 Delta
+                w_approx[:, k] += Delta#更新第k类别的权重向量 w_approx，增加计算出的权重更新量 Delta
                 grad_norm_approx[i] += (Delta.norm() * Delta_p.norm() * spec_norm / 4).cpu()#梯度范数的近似计算
                 '''
                 Delta.norm() 表示移除样本后，权重更新的幅度。
