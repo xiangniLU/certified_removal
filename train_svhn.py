@@ -11,7 +11,7 @@ import math
 import argparse
 from torch.utils.data import TensorDataset, DataLoader
 from models import Extractor, MLP  # 导入自定义的模型
-from fast_grad_models import FastGradExtractor, FastGradMLP, MLPExtractor, LSTMExtractor, TfExtractor  # 导入自定义的快速梯度模型
+from fast_grad_models import FastGradExtractor, FastGradMLP, MLPExtractor, TfExtractor  # 导入自定义的快速梯度模型
 from train_func import train, train_private  # 导入训练函数
 from test_func import test, test_linear  # 导入测试函数
 import utils

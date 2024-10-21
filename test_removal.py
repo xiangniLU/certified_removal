@@ -26,7 +26,7 @@ from utils import load_features
 parser = argparse.ArgumentParser(description='Training a removal-enabled linear model and testing removal')
 
 # 添加参数：数据目录，必填项，字符串类型
-parser.add_argument('--data-dir', type=str, required=True, help='data directory')
+#parser.add_argument('--data-dir', type=str, required=True, help='data directory')
 
 # 添加参数：结果目录，字符串类型，默认值为'result'
 parser.add_argument('--result-dir', type=str, default='save/result', help='directory for saving results')
@@ -39,7 +39,7 @@ parser.add_argument('--lam', type=float, default=1e-6, help='L2 regularization')
 # 添加参数：目标扰动的标准差，浮点数类型，默认值为10.0
 parser.add_argument('--std', type=float, default=10.0, help='standard deviation for objective perturbation')
 # 添加参数：要移除的数据点数量，整数类型，默认值为1000
-parser.add_argument('--num-removes', type=int, default=6000, help='number of data points to remove')
+parser.add_argument('--num-removes', type=int, default=9600, help='number of data points to remove')
 # 添加参数：训练数据拆分数量，整数类型，默认值为1
 parser.add_argument('--train-splits', type=int, default=1, help='number of training data splits')
 # 添加参数：负样本子采样比率，浮点数类型，默认值为1.0

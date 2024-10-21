@@ -7,7 +7,7 @@
 
 import torch
 import torch.nn as nn
-from opacus.layers import DPLSTM
+# from opacus.layers import DPLSTM
 import torch.nn.functional as F
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
 
@@ -90,16 +90,16 @@ class MLPFeatureExtractor(nn.Module):
 
 # LSTM网络
 
-class LSTMFeatureExtractor(nn.Module):
-    def __init__(self, input_size=102, hidden_size=32, num_layers=2):
-        super(LSTMFeatureExtractor, self).__init__()
-        self.rnn = DPLSTM(input_size, hidden_size, num_layers, dropout=0.2, batch_first=True)
-
-    def forward(self, x):
-        r_out, (h_s, h_c) = self.rnn(x)
-        out = r_out[:, -1, :]
-
-        return out
+# class LSTMFeatureExtractor(nn.Module):
+#     def __init__(self, input_size=102, hidden_size=32, num_layers=2):
+#         super(LSTMFeatureExtractor, self).__init__()
+#         self.rnn = DPLSTM(input_size, hidden_size, num_layers, dropout=0.2, batch_first=True)
+#
+#     def forward(self, x):
+#         r_out, (h_s, h_c) = self.rnn(x)
+#         out = r_out[:, -1, :]
+#
+#         return out
 
 
 class TfFeatureExtractor(nn.Module):

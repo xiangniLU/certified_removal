@@ -8,7 +8,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from opacus.layers import DPLSTM
+# from opacus.layers import DPLSTM
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
 
 from fast_grad_conv import FastGradConv2d
@@ -80,18 +80,18 @@ class MLPExtractor(nn.Module):
 #         out = r_out[:, -1, :]  # 取最后一个时间步的输出
 #         return out
 
-class LSTMExtractor(nn.Module):
-    def __init__(self, input_size=28, hidden_size=128, num_layers=2):
-        super(LSTMExtractor, self).__init__()
-        self.rnn = DPLSTM(input_size, hidden_size, num_layers, dropout=0.2, batch_first=True)
-
-    def forward(self, x):
-        # x shape: (batch_size, 1, 28, 28)
-        batch_size = x.size(0)
-        x = x.squeeze(1)  # 去除通道维度，变为 (batch_size, 28, 28)
-        r_out, (h_s, h_c) = self.rnn(x)
-        out = r_out[:, -1, :]  # 取最后一个时间步的输出
-        return out
+# class LSTMExtractor(nn.Module):
+#     def __init__(self, input_size=28, hidden_size=128, num_layers=2):
+#         super(LSTMExtractor, self).__init__()
+#         self.rnn = DPLSTM(input_size, hidden_size, num_layers, dropout=0.2, batch_first=True)
+#
+#     def forward(self, x):
+#         # x shape: (batch_size, 1, 28, 28)
+#         batch_size = x.size(0)
+#         x = x.squeeze(1)  # 去除通道维度，变为 (batch_size, 28, 28)
+#         r_out, (h_s, h_c) = self.rnn(x)
+#         out = r_out[:, -1, :]  # 取最后一个时间步的输出
+#         return out
 
 # class TfExtractor(nn.Module):
 #     def __init__(self, input_dim=28, hidden_dim=64, num_layers=1):
