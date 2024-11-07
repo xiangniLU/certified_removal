@@ -39,7 +39,7 @@ parser.add_argument('--lam', type=float, default=1e-6, help='L2 regularization')
 # 添加参数：目标扰动的标准差，浮点数类型，默认值为10.0
 parser.add_argument('--std', type=float, default=10.0, help='standard deviation for objective perturbation')
 # 添加参数：要移除的数据点数量，整数类型，默认值为1000
-parser.add_argument('--num-removes', type=int, default=9600, help='number of data points to remove')
+parser.add_argument('--num-removes', type=int, default=600, help='number of data points to remove')
 # 添加参数：训练数据拆分数量，整数类型，默认值为1
 parser.add_argument('--train-splits', type=int, default=1, help='number of training data splits')
 # 添加参数：负样本子采样比率，浮点数类型，默认值为1.0
@@ -181,22 +181,27 @@ def spectral_norm(A, num_iters=20):
 def lr_grad_b(w, X, y, lam, b=None):
     X, y = X.to(device), y.to(device)
     if y.dim() > 1:
-        # Multi-class case
-        z = torch.sigmoid(X.mm(w))  # X.mm(w) for multi-class
+        # 多分类情况下：X.mm(w) 的结果和 y 的形状都为 (batch_size, num_classes)
+        z = torch.sigmoid(X.mm(w))
         grad = X.t().mm(z - y) + lam * X.size(0) * w
 
-        # Ensure b matches the shape of grad
+        # 确保 b 的形状与 grad 匹配
         if b is not None:
-            grad += b / X.size(0)  # `b` should be a matrix in multi-class case
+            if b.shape != grad.shape:
+                raise ValueError(f"Expected `b` shape {grad.shape}, but got {b.shape}")
+            grad += b / X.size(0)
     else:
-        # Binary classification case
+        # 二分类情况下：w 是一个向量，X.mv(w) 的结果和 y 的形状都为 (batch_size,)
         z = torch.sigmoid(y * X.mv(w))
         grad = X.t().mv((z - 1) * y) + lam * X.size(0) * w
 
-        # Ensure b matches the shape of grad
+        # 确保 b 是向量
         if b is not None:
-            grad += b / X.size(0)  # `b` should be a vector in binary case
+            if b.shape != grad.shape:
+                raise ValueError(f"Expected `b` shape {grad.shape}, but got {b.shape}")
+            grad += b / X.size(0)
     return grad
+
 
 # Function to calculate the total gradient over the dataset with optional objective perturbation
 def calculate_total_gradient(w, X, y, lam, b=None, indices=None):
@@ -298,13 +303,15 @@ else:
         X_sub = X_train.cpu()[weight[:, i].gt(0).cpu()]#选择当前类别中权重大于0的训练样本
         Ks.append(X_sub.t().mm(X_sub).to(device))#计算选定样本的转置矩阵与自身的矩阵乘积，并将结果添加到Ks列表中
 
+
 # Initialize b for objective perturbation, adjusted for the mode
 if args.train_mode == 'ovr':
-    # In ovr mode, b has multiple dimensions, one for each class
+    # 多分类模式：b 是一个矩阵
     b = args.std * torch.randn(X_train.size(1), y_train_onehot.size(1)).float().to(device)
 else:
-    # In binary mode, b is a single vector
+    # 二分类模式：b 是一个向量
     b = args.std * torch.randn(X_train.size(1)).float().to(device)
+
 
 # Calculate initial gradient before removal, using the correct b
 if args.train_mode == 'ovr':
@@ -327,7 +334,11 @@ for i in range(args.num_removes):
                     X_rem = X_rem[weight[(i+1):, k].gt(0)]
                     y_rem = y_rem[weight[(i+1):, k].gt(0)]
                 H_inv = lr_hessian_inv(w_approx[:, k], X_rem, y_rem, args.lam) # 计算Hessian矩阵的逆
-                grad_i = lr_grad_b(w_approx[:, k], X_train[i].unsqueeze(0), y_train[i, k].unsqueeze(0), args.lam,b=b)# 计算梯度
+                # Check b shape based on mode
+                #current_b = b[:, k] if args.train_mode == 'ovr' else b  # 多分类传 b[:, k]，二分类直接传 b
+                #grad_i = lr_grad_b(w_approx[:, k], X_train[i].unsqueeze(0), y_train[i, k].unsqueeze(0), args.lam,b=current_b)
+                #grad_i = lr_grad_b(w_approx[:, k], X_train[i].unsqueeze(0), y_train[i, k].unsqueeze(0), args.lam,b=b)# 计算梯度
+                grad_i = lr_grad(w_approx[:, k], X_train[i].unsqueeze(0), y_train[i, k].unsqueeze(0), args.lam)
                 # 更新K矩阵，减去样本对K的贡献
                 if weight is None:
                     K -= torch.ger(X_train[i], X_train[i])
@@ -340,13 +351,14 @@ for i in range(args.num_removes):
                 Delta_p = X_rem.mv(Delta)#更新量对剩余样本的整体影响
                 w_approx[:, k] += Delta#更新第k类别的权重向量 w_approx，增加计算出的权重更新量 Delta
                 grad_norm_approx[i] += (Delta.norm() * Delta_p.norm() * spec_norm / 4).cpu()#梯度范数的近似计算
-                remaining_indices.remove(i)  # or other logic to exclude specific data points
-                '''
+        remaining_indices.remove(i)  # or other logic to exclude specific data points
+
+        '''
                 Delta.norm() 表示移除样本后，权重更新的幅度。
                 Delta_p.norm() 表示这个更新对剩余样本的影响。
                 spec_norm 表示模型矩阵的尺度。
                 这三个因素的乘积反映了模型在移除样本后对整体损失的变化。除以 4 是为了调整尺度，使结果更平稳。
-                '''
+        '''
     else:
         for k in range(y_train_onehot.size(1)):
             if weight is None or weight[i, k] > 0:
@@ -364,7 +376,7 @@ for i in range(args.num_removes):
                 Delta_p = X_rem.mv(Delta)
                 w_approx += Delta
                 grad_norm_approx[i] += (Delta.norm() * Delta_p.norm() * spec_norm / 4).cpu()
-                remaining_indices.remove(i)  # or other logic to exclude specific data points
+        remaining_indices.remove(i)  # or other logic to exclude specific data points
 
     times[i] = time.time() - start
     print('Iteration %d: Grad norm bound = %.6f, time = %.2fs' % (i+1, grad_norm_approx[i], times[i]))
