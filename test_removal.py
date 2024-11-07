@@ -26,7 +26,7 @@ from utils import load_features
 parser = argparse.ArgumentParser(description='Training a removal-enabled linear model and testing removal')
 
 # 添加参数：数据目录，必填项，字符串类型
-#parser.add_argument('--data-dir', type=str, required=True, help='data directory')
+parser.add_argument('--data-dir', type=str, required=True, help='data directory')
 
 # 添加参数：结果目录，字符串类型，默认值为'result'
 parser.add_argument('--result-dir', type=str, default='save/result', help='directory for saving results')
@@ -39,7 +39,7 @@ parser.add_argument('--lam', type=float, default=1e-6, help='L2 regularization')
 # 添加参数：目标扰动的标准差，浮点数类型，默认值为10.0
 parser.add_argument('--std', type=float, default=10.0, help='standard deviation for objective perturbation')
 # 添加参数：要移除的数据点数量，整数类型，默认值为1000
-parser.add_argument('--num-removes', type=int, default=9600, help='number of data points to remove')
+parser.add_argument('--num-removes', type=int, default=6000, help='number of data points to remove')
 # 添加参数：训练数据拆分数量，整数类型，默认值为1
 parser.add_argument('--train-splits', type=int, default=1, help='number of training data splits')
 # 添加参数：负样本子采样比率，浮点数类型，默认值为1.0
@@ -88,11 +88,14 @@ def lr_hessian_inv(w, X, y, lam, batch_size=50000):
 # lr_hessian_inv计算逻辑回归模型的Hessian矩阵的逆，用于在移除数据时进行模型参数的更新。
 
 def lr_optimize(X, y, lam, b=None, num_steps=100, tol=1e-10, verbose=False):
+    # 1. 初始化参数 w
     w = torch.autograd.Variable(torch.zeros(X.size(1)).float().to(device), requires_grad=True)
 
+    # 2. 定义闭包函数 closure，用于重新计算损失.
+    #  返回损失函数的值。L-BFGS 优化器在每次更新时会调用这个闭包函数，以重新计算梯度和损失。
     def closure():
         if b is None:
-            return lr_loss(w, X, y, lam)
+            return lr_loss(w, X, y, lam) # 不包含偏置项的损失
         else:
             return lr_loss(w, X, y, lam) + b.dot(w) / X.size(0)
 
@@ -115,7 +118,7 @@ def ovr_lr_loss(w, X, y, lam, weight=None):
         return -F.logsigmoid(z).mean(0).sum() + lam * w.pow(2).sum() / 2
     else:
         return -F.logsigmoid(z).mul_(weight).sum() + lam * w.pow(2).sum() / 2
-
+# 计算线性模型的损失函数，这里使用逻辑回归的对数似然损失函数，并加入L2正则化。
 
 def ovr_lr_optimize(X, y, lam, weight=None, b=None, num_steps=100, tol=1e-10, verbose=False):
     w = torch.autograd.Variable(torch.zeros(X.size(1), y.size(1)).float().to(device), requires_grad=True)
