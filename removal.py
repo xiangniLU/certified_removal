@@ -142,6 +142,8 @@ def ovr_lr_optimize(X, y, lam, weight=None, b=None, num_steps=100, tol=1e-10, ve
         if verbose:
             print('Iteration %d: loss = %.6f, grad_norm = %.6f' % (i + 1, loss.cpu(), w.grad.norm()))
         optimizer.step(closure)
+    initial_grad_norm = w.grad.norm().item()
+    print("Initial gradient norm (after optimization):", initial_grad_norm)
     return w.data
 
 #batch_multiply：用于大规模矩阵相乘，按批次处理数据以节省内存
@@ -177,43 +179,6 @@ def spectral_norm(A, num_iters=20):
     return math.sqrt(norm)
 #spectral_norm：计算矩阵的谱范数，用于衡量 Hessian 矩阵的变化。
 
-# Modified lr_grad_b function to support multi-class classification
-def lr_grad_b(w, X, y, lam, b=None):
-    X, y = X.to(device), y.to(device)
-    if y.dim() > 1:
-        # 多分类情况下：X.mm(w) 的结果和 y 的形状都为 (batch_size, num_classes)
-        z = torch.sigmoid(X.mm(w))
-        grad = X.t().mm(z - y) + lam * X.size(0) * w
-
-        # 确保 b 的形状与 grad 匹配
-        if b is not None:
-            if b.shape != grad.shape:
-                raise ValueError(f"Expected `b` shape {grad.shape}, but got {b.shape}")
-            grad += b / X.size(0)
-    else:
-        # 二分类情况下：w 是一个向量，X.mv(w) 的结果和 y 的形状都为 (batch_size,)
-        z = torch.sigmoid(y * X.mv(w))
-        grad = X.t().mv((z - 1) * y) + lam * X.size(0) * w
-
-        # 确保 b 是向量
-        if b is not None:
-            if b.shape != grad.shape:
-                raise ValueError(f"Expected `b` shape {grad.shape}, but got {b.shape}")
-            grad += b / X.size(0)
-    return grad
-
-
-# Function to calculate the total gradient over the dataset with optional objective perturbation
-def calculate_total_gradient(w, X, y, lam, b=None, indices=None):
-    if indices is None:
-        indices = range(X.size(0))  # Use all data if no indices provided
-    total_grad = torch.zeros_like(w)
-    for i in indices:
-        X_i = X[i].unsqueeze(0).to(device)  # Move X[i] to the correct device
-        y_i = y[i].unsqueeze(0).to(device)  # Move y[i] to the correct device
-        total_grad += lr_grad_b(w, X_i, y_i, lam, b=b)
-    return total_grad
-
 # 加载数据集的特征和标签
 X_train, X_test, y_train, y_train_onehot, y_test = load_features(args)
 X_test = X_test.float().to(device)
@@ -221,6 +186,10 @@ y_test = y_test.to(device)
 
 save_path = '%s/%s_%s_splits_%d_ratio_%.2f_std_%.1f_lam_%.0e.pth' % (
     args.result_dir, args.extractor, args.dataset, args.train_splits, args.subsample_ratio, args.std, args.lam)
+
+# if args.train_mode == 'ovr':
+#     b = args.std * torch.randn(X_train.size(1), y_train_onehot.size(1)).float().to(device)
+
 if os.path.exists(save_path):  # 检查模型是否已经存在
     # 加载已经训练好的模型参数
     checkpoint = torch.load(save_path)
@@ -260,7 +229,7 @@ else:
                                           args.lam, b=b[:, k], num_steps=args.num_steps, verbose=args.verbose)
         else:
             # # 一次性联合训练所有二分类模型
-            w = ovr_lr_optimize(X_train, y_train_onehot, args.lam, weight, b=b, num_steps=args.num_steps,
+            w= ovr_lr_optimize(X_train, y_train_onehot, args.lam, weight, b=b, num_steps=args.num_steps,
                                 verbose=args.verbose)
     else:
         # 如果训练模式为二分类或其他模式，则训练一个二分类逻辑回归模型
@@ -304,24 +273,8 @@ else:
         Ks.append(X_sub.t().mm(X_sub).to(device))#计算选定样本的转置矩阵与自身的矩阵乘积，并将结果添加到Ks列表中
 
 
-# Initialize b for objective perturbation, adjusted for the mode
-if args.train_mode == 'ovr':
-    # 多分类模式：b 是一个矩阵
-    b = args.std * torch.randn(X_train.size(1), y_train_onehot.size(1)).float().to(device)
-else:
-    # 二分类模式：b 是一个向量
-    b = args.std * torch.randn(X_train.size(1)).float().to(device)
-
-
-# Calculate initial gradient before removal, using the correct b
-if args.train_mode == 'ovr':
-    initial_grad = calculate_total_gradient(w_approx, X_train, y_train_onehot, args.lam, b=b)
-else:
-    initial_grad = calculate_total_gradient(w_approx, X_train, y_train, args.lam, b=b)
-
-remaining_indices = list(range(X_train.size(0)))  # Initially all data points
-
 print('Testing removal')
+Accum_True_RGN_sum = 0
 for i in range(args.num_removes):
     start = time.time()
     if args.train_mode == 'ovr':
@@ -334,16 +287,11 @@ for i in range(args.num_removes):
                     X_rem = X_rem[weight[(i+1):, k].gt(0)]
                     y_rem = y_rem[weight[(i+1):, k].gt(0)]
                 H_inv = lr_hessian_inv(w_approx[:, k], X_rem, y_rem, args.lam) # 计算Hessian矩阵的逆
-                # Check b shape based on mode
-                #current_b = b[:, k] if args.train_mode == 'ovr' else b  # 多分类传 b[:, k]，二分类直接传 b
-                #grad_i = lr_grad_b(w_approx[:, k], X_train[i].unsqueeze(0), y_train[i, k].unsqueeze(0), args.lam,b=current_b)
-                #grad_i = lr_grad_b(w_approx[:, k], X_train[i].unsqueeze(0), y_train[i, k].unsqueeze(0), args.lam,b=b)# 计算梯度
-                grad_i = lr_grad(w_approx[:, k], X_train[i].unsqueeze(0), y_train[i, k].unsqueeze(0), args.lam)
+                grad_i = lr_grad(w_approx[:, k], X_train[i].unsqueeze(0), y_train[i, k].unsqueeze(0), args.lam)# 计算梯度
                 # 更新K矩阵，减去样本对K的贡献
                 if weight is None:
                     K -= torch.ger(X_train[i], X_train[i])
                     spec_norm = spectral_norm(K)
-                    #矩阵更新(Hessian的近似更新)
                 else:
                     Ks[k] -= torch.ger(X_train[i], X_train[i])
                     spec_norm = spectral_norm(Ks[k])
@@ -351,21 +299,20 @@ for i in range(args.num_removes):
                 Delta_p = X_rem.mv(Delta)#更新量对剩余样本的整体影响
                 w_approx[:, k] += Delta#更新第k类别的权重向量 w_approx，增加计算出的权重更新量 Delta
                 grad_norm_approx[i] += (Delta.norm() * Delta_p.norm() * spec_norm / 4).cpu()#梯度范数的近似计算
-        remaining_indices.remove(i)  # or other logic to exclude specific data points
-
-        '''
+                Accum_True_RGN_sum = lr_grad(w_approx[:, k], X_rem, y_rem, args.lam)+b[:, k]
+                '''
                 Delta.norm() 表示移除样本后，权重更新的幅度。
                 Delta_p.norm() 表示这个更新对剩余样本的影响。
                 spec_norm 表示模型矩阵的尺度。
                 这三个因素的乘积反映了模型在移除样本后对整体损失的变化。除以 4 是为了调整尺度，使结果更平稳。
-        '''
+                '''
     else:
         for k in range(y_train_onehot.size(1)):
             if weight is None or weight[i, k] > 0:
                 X_rem = X_train[(i+1):]
                 y_rem = y_train[(i+1):]
                 H_inv = lr_hessian_inv(w_approx[:], X_rem, y_rem, args.lam)
-                grad_i = lr_grad_b(w_approx, X_train[i].unsqueeze(0), y_train[i].unsqueeze(0), args.lam, b=b)
+                grad_i = lr_grad(w_approx, X_train[i].unsqueeze(0), y_train[i].unsqueeze(0), args.lam)
                 if weight is None:
                     K -= torch.ger(X_train[i], X_train[i])
                     spec_norm = spectral_norm(K)
@@ -376,17 +323,11 @@ for i in range(args.num_removes):
                 Delta_p = X_rem.mv(Delta)
                 w_approx += Delta
                 grad_norm_approx[i] += (Delta.norm() * Delta_p.norm() * spec_norm / 4).cpu()
-        remaining_indices.remove(i)  # or other logic to exclude specific data points
 
+    Accum_True_RGN = Accum_True_RGN_sum.norm().item()
+    cumulative_grad_norm = grad_norm_approx[:i + 1].sum().item()#累积梯度残差
     times[i] = time.time() - start
-    print('Iteration %d: Grad norm bound = %.6f, time = %.2fs' % (i+1, grad_norm_approx[i], times[i]))
-
-cumulative_grad_norm = torch.sum(grad_norm_approx)
-print('Cumulative grad_norm_approx sum = %.6f' % cumulative_grad_norm)
-final_grad = calculate_total_gradient(w_approx, X_train, y_train, args.lam, b=b, indices=remaining_indices)
-grad_residual = (initial_grad - final_grad).norm().item()
-print('Gradient residual (true gradient difference) = %.6f' % grad_residual)
-
+    print('Iteration %d: Grad norm bound = %.6f, time = %.2fs,cumulative_grad_norm = %.6f,true gradient residual = %.6f' % (i + 1, grad_norm_approx[i], times[i], cumulative_grad_norm,Accum_True_RGN))
 
 if args.train_mode == 'ovr':
     pred = X_test.mm(w_approx).max(1)[1]
