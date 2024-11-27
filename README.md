@@ -35,7 +35,7 @@ python train_svhn.py --data-dir <SVHN path> --test-mode extract --std 6 --delta 
 Training a removal-enabled one-vs-all linear classifier and removing 1000 training points:
 
 ```bash
-python test_removal.py --data-dir <SVHN path> --verbose --extractor dp_delta_1.00e-05_std_6.00 --dataset SVHN --std 10 --lam 2e-4 --num-steps 100 --subsample-ratio 0.1
+python removal.py --data-dir <SVHN path> --verbose --extractor dp_delta_1.00e-05_std_6.00 --dataset SVHN --std 10 --lam 2e-4 --num-steps 100 --subsample-ratio 0.1
 
 ```## !python /content/drive/MyDrive/certified-removal-main/train_svhn.py --data-dir /content/drive/MyDrive/certified-removal-main/SVHN --test-mode extract --std 6 --delta 1e-5 --save-model --save-dir /content/drive/MyDrive/certified-removal-main/Model 
 
@@ -48,7 +48,7 @@ For this setting, the number of certifiably removed training points is limited b
 Training a removal-enabled binary logistic regression classifier for MNIST 3 vs. 8 and removing 1000 training points:
 
 ```bash
-python test_removal.py --data-dir <MNIST path> --verbose --extractor none --dataset MNIST --train-mode binary --std 10 --lam 1e-3 --num-steps 100
+python removal.py --data-dir <MNIST path> --verbose --extractor none --dataset MNIST --train-mode binary --std 10 --lam 1e-3 --num-steps 100
 ```
 
 ### Reference

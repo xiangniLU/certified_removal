@@ -39,7 +39,7 @@ parser.add_argument('--lam', type=float, default=1e-6, help='L2 regularization')
 # 添加参数：目标扰动的标准差，浮点数类型，默认值为10.0
 parser.add_argument('--std', type=float, default=10.0, help='standard deviation for objective perturbation')
 # 添加参数：要移除的数据点数量，整数类型，默认值为1000
-parser.add_argument('--num-removes', type=int, default=600, help='number of data points to remove')
+parser.add_argument('--num-removes', type=int, default=10000, help='number of data points to remove')
 # 添加参数：训练数据拆分数量，整数类型，默认值为1
 parser.add_argument('--train-splits', type=int, default=1, help='number of training data splits')
 # 添加参数：负样本子采样比率，浮点数类型，默认值为1.0
@@ -275,6 +275,10 @@ else:
 
 print('Testing removal')
 Accum_True_RGN_sum = 0
+# 在循环外生成一次扰动 b_prime，尺寸与 w_approx 一致
+std_fixed = 0.55  # 根据需要调整标准差
+b_prime = std_fixed * torch.randn(X_train.size(1), y_train_onehot.size(1)).float().to(device)
+acctime=0
 for i in range(args.num_removes):
     start = time.time()
     if args.train_mode == 'ovr':
@@ -299,13 +303,28 @@ for i in range(args.num_removes):
                 Delta_p = X_rem.mv(Delta)#更新量对剩余样本的整体影响
                 w_approx[:, k] += Delta#更新第k类别的权重向量 w_approx，增加计算出的权重更新量 Delta
                 grad_norm_approx[i] += (Delta.norm() * Delta_p.norm() * spec_norm / 4).cpu()#梯度范数的近似计算
-                Accum_True_RGN_sum = lr_grad(w_approx[:, k], X_rem, y_rem, args.lam)+b[:, k]
                 '''
                 Delta.norm() 表示移除样本后，权重更新的幅度。
                 Delta_p.norm() 表示这个更新对剩余样本的影响。
                 spec_norm 表示模型矩阵的尺度。
                 这三个因素的乘积反映了模型在移除样本后对整体损失的变化。除以 4 是为了调整尺度，使结果更平稳。
                 '''
+                # 添加迭代细化步骤
+                num_refine_steps = 10  # 可根据需要调整迭代次数
+                w_refined = w_approx[:, k].clone().detach().requires_grad_(True)
+                optimizer = optim.LBFGS([w_refined], max_iter=num_refine_steps, tolerance_grad=1e-10,
+                                        tolerance_change=1e-20)
+                def closure():
+                    optimizer.zero_grad()
+                    loss = lr_loss(w_refined, X_rem, y_rem, args.lam)
+                    loss += b_prime[:, k].dot(w_refined) / X_rem.size(0)#加入偏置项
+                    loss.backward()
+                    return loss
+
+                optimizer.step(closure)
+                # 更新近似的参数为细化后的参数
+                w_approx[:, k] = w_refined.detach()
+                Accum_True_RGN_sum = lr_grad(w_approx[:, k], X_rem, y_rem, args.lam) + b[:, k]
     else:
         for k in range(y_train_onehot.size(1)):
             if weight is None or weight[i, k] > 0:
@@ -327,7 +346,8 @@ for i in range(args.num_removes):
     Accum_True_RGN = Accum_True_RGN_sum.norm().item()
     cumulative_grad_norm = grad_norm_approx[:i + 1].sum().item()#累积梯度残差
     times[i] = time.time() - start
-    print('Iteration %d: Grad norm bound = %.6f, time = %.2fs,cumulative_grad_norm = %.6f,true gradient residual = %.6f' % (i + 1, grad_norm_approx[i], times[i], cumulative_grad_norm,Accum_True_RGN))
+    acctime+=times[i]
+    print('Iteration %d: Grad norm bound = %.6f, time = %.2fs,cumulative time= %.2fs,cumulative_grad_norm = %.6f,true gradient residual = %.6f' % (i + 1, grad_norm_approx[i], times[i],acctime, cumulative_grad_norm,Accum_True_RGN))
 
 if args.train_mode == 'ovr':
     pred = X_test.mm(w_approx).max(1)[1]
