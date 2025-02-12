@@ -91,7 +91,7 @@ def  main():
 
     # 设置保存路径
     # save_path = "%s/svhn_cnn_delta_%.2e_std_%.2f%s.pth" % ("save/result", args.delta, args.std, args.save_suffix)
-    save_path = "save/result/svhn_mlp5_DP_SGD.pth"
+    save_path = "save/result/svhn_cnn5_DP_SGD.pth"
     # 如果模型文件不存在，则进行训练和保存
     if not os.path.exists(save_path):
         # 优化器
