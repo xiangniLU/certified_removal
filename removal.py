@@ -310,7 +310,6 @@ for i in range(args.num_removes):
                 这三个因素的乘积反映了模型在移除样本后对整体损失的变化。除以 4 是为了调整尺度，使结果更平稳。
                 '''
                 # 添加迭代细化步骤
-                '''
                 num_refine_steps = 10  # 可根据需要调整迭代次数
                 w_refined = w_approx[:, k].clone().detach().requires_grad_(True)
                 optimizer = optim.LBFGS([w_refined], max_iter=num_refine_steps, tolerance_grad=1e-10,
@@ -325,7 +324,6 @@ for i in range(args.num_removes):
                 optimizer.step(closure)
                 # 更新近似的参数为细化后的参数
                 w_approx[:, k] = w_refined.detach()
-                '''
                 Accum_True_RGN_sum = lr_grad(w_approx[:, k], X_rem, y_rem, args.lam) + b[:, k]
     else:
         for k in range(y_train_onehot.size(1)):
